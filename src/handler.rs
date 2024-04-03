@@ -3,7 +3,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, Write};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
-use async_std::task;
 use serenity::async_trait;
 use serenity::builder::GetMessages;
 use serenity::model::channel::Message;
@@ -11,6 +10,7 @@ use serenity::model::gateway::Ready;
 use serenity::model::id::ChannelId;
 use serenity::prelude::*;
 use regex::Regex;
+use tokio::time;
 
 use crate::news::News;
 
@@ -185,7 +185,7 @@ impl EventHandler for Handler {
                     }
                 }
             }
-            task::sleep(Duration::from_secs(self.poll_period)).await;
+            time::sleep(Duration::from_secs(self.poll_period)).await;
         }
     }
 }
