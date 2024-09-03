@@ -29,7 +29,7 @@ impl News {
     }
 
     pub fn iter(&self) -> Iter<NewsItem> {
-        return self.news.iter();
+        self.news.iter()
     }
 }
 
@@ -51,8 +51,8 @@ impl NewsItem {
 
     pub fn get_msg_str(&self) -> String {
         let new_url = format!("https://playstartrekonline.com/en/news/article/{}", self.id);
-        let mut result = format!("**{}**\n{}\n<{}>\n", self.title, self.summary, new_url);
-        for platform in &self.platforms {
+        let result = format!("**{}**\n{}\n<{}>\n", self.title, self.summary, new_url);
+        /*for platform in &self.platforms {
             result += "<https://www.arcgames.com/en/games";
             match platform.as_str() {
                 "ps" => result += "/playstation",
@@ -60,7 +60,7 @@ impl NewsItem {
                 _ => {}
             }
             result = format!("{}/star-trek-online/news/detail/{}>\n", result, self.id);
-        }
+        }*/
         result
     }
 
@@ -68,7 +68,7 @@ impl NewsItem {
         if let Ok(naive) = NaiveDateTime::parse_from_str(&self.updated, "%Y-%m-%d %H:%M:%S") {
             if let Single(pacific) = Los_Angeles.from_local_datetime(&naive) {
                 let diff = Utc::now().signed_duration_since(pacific);
-                return diff.num_seconds().abs() as u64 <= diff_threshold;
+                diff.num_seconds().abs() as u64 <= diff_threshold
             }
             else {
                 false
@@ -82,6 +82,6 @@ impl NewsItem {
 
 impl PartialEq for NewsItem{
     fn eq(&self, other: &Self) -> bool {
-        return self.id == other.id
+        self.id == other.id
     }
 }
