@@ -1,6 +1,6 @@
 [package]
 name = "stobot"
-version = "0.10.0"
+version = "0.10.1"
 edition = "2021"
 license = "GPL-3.0-or-later"
 
@@ -24,7 +24,7 @@ features = ["derive"]
 #features = ["vendored"]
 
 [dependencies.serenity]
-version = "~0.12"
+version = "=0.12.1"
 default-features = false
 features = ["client", "gateway", "rustls_backend", "model", "cache", "http"]
 
