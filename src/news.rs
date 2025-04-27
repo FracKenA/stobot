@@ -25,10 +25,6 @@ impl News {
         }
     }
 
-    pub fn count(&self) -> u64 {
-        self.news.len() as u64
-    }
-
     pub fn iter(&self) -> Iter<NewsItem> {
         self.news.iter()
     }
@@ -48,21 +44,6 @@ pub struct NewsItem {
 impl NewsItem {
     pub fn get_id(&self) -> u64 {
         self.id
-    }
-
-    pub fn get_msg_str(&self) -> String {
-        let new_url = format!("https://playstartrekonline.com/en/news/article/{}", self.id);
-        let result = format!("**{}**\n{}\n<{}>\n", self.title, self.summary, new_url);
-        /*for platform in &self.platforms {
-            result += "<https://www.arcgames.com/en/games";
-            match platform.as_str() {
-                "ps" => result += "/playstation",
-                "xbox" => result += "/xbox",
-                _ => {}
-            }
-            result = format!("{}/star-trek-online/news/detail/{}>\n", result, self.id);
-        }*/
-        result
     }
 
     pub fn is_fresh(&self, diff_threshold: u64) -> bool {
@@ -98,19 +79,11 @@ impl NewsItem {
         &self.title
     }
 
-    pub fn get_platforms(&self) -> &BTreeSet<String> {
-        &self.platforms
-    }
-
     pub fn get_thumbnail_url(&self) -> Option<&str> {
         self.images
             .get("img_microsite_thumbnail")
             .and_then(|img| img.get("url"))
             .map(|s| s.as_str())
-    }
-
-    pub fn get_summary(&self) -> &str {
-        &self.summary
     }
 
     pub fn get_tag(&self) -> &str {
@@ -121,6 +94,17 @@ impl NewsItem {
         } else {
             "star-trek-online"
         }
+    }
+
+    pub fn format_with_platforms(&self, selected_platforms: &BTreeSet<String>) -> (String, Vec<String>) {
+        let matching: Vec<&String> = self.platforms.iter().filter(|p| selected_platforms.contains(&p.to_lowercase())).collect();
+        let icon_files: Vec<String> = matching.iter().map(|p| match p.to_lowercase().as_str() {
+            "pc" => "static/pc.png".to_string(),
+            "ps" | "playstation" => "static/ps.png".to_string(),
+            "xbox" => "static/xbox.png".to_string(),
+            _ => "static/unknown.png".to_string(),
+        }).collect();
+        (self.summary.clone(), icon_files)
     }
 }
 

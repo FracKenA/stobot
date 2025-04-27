@@ -4,7 +4,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::sync::{Mutex, MutexGuard};
 use std::time::Duration;
 use serenity::async_trait;
-use serenity::builder::{CreateCommand, CreateCommandOption, CreateInteractionResponse, CreateInteractionResponseMessage, GetMessages, CreateEmbed, CreateEmbedFooter, CreateInteractionResponseFollowup};
+use serenity::builder::{CreateCommand, CreateCommandOption, CreateInteractionResponse, CreateInteractionResponseMessage, GetMessages, CreateEmbed, CreateEmbedFooter, CreateInteractionResponseFollowup, CreateAttachment};
 use serenity::all::{
     Interaction, CommandOptionType,
     CommandInteraction, Command,
@@ -13,9 +13,9 @@ use serenity::model::channel::Message;
 use serenity::model::gateway::Ready;
 use serenity::model::id::ChannelId;
 use serenity::prelude::*;
-use serenity::futures::Future;
+// use serenity::futures::Future;
 use regex::Regex;
-use tokio::time::{self, sleep};
+use tokio::time::{self};
 use chrono::Local;
 use scraper::{Html, Selector};
 
@@ -172,86 +172,37 @@ impl Handler {
         self.write_channels_to_file(&channel_ids, &platforms_map);
     }
 
-    async fn retry_with_backoff<F, T, E, Fut>(mut operation: F, retries: u32, backoff: u64) -> Result<T, E>
-    where
-        F: FnMut() -> Fut,
-        Fut: Future<Output = Result<T, E>>,
-    {
-        let mut attempt = 0;
-        while attempt < retries {
-            match operation().await {
-                Ok(result) => return Ok(result),
-                Err(_e) if attempt < retries - 1 => {
-                    sleep(Duration::from_secs(backoff * (attempt as u64 + 1))).await;
-                    attempt += 1;
-                }
-                Err(e) => return Err(e),
-            }
-        }
-        match operation().await {
-            Ok(r) => Ok(r),
-            Err(e) => Err(e),
-        }
-    }
-
-    async fn get_news_json_with_retry(count: u64) -> Result<String, reqwest::Error> {
-        Self::retry_with_backoff(
-            || async {
-                let url = format!("https://api.arcgames.com/v1.0/games/sto/news?limit={count}&field[]=platforms&field[]=updated");
-                let response = reqwest::get(&url).await?;
-                let text = response.text().await?;
-                Ok(text)
-            }, 
-            3, 
-            2
-        ).await
-    }
-
-    async fn get_news_from_json(count: u64) -> Option<News> {
-        match Self::get_news_json_with_retry(count).await {
-            Ok(text) => {
-                match serde_json::from_str::<News>(text.as_str()) {
-                    Ok(item) => {
-                        if item.count() == count {
-                            Some(item)
-                        } else {
-                            log_error("Fetching news from API", format!("Expected {} news items, but got {}.", count, item.count()));
-                            None
-                        }
-                    }
-                    Err(why) => {
-                        log_error("Parsing news data from API response", why);
-                        None
-                    }
-                }
-            }
-            Err(why) => {
-                log_error("Parsing news data from API response", why);
-                None
-            }
-        }
-    }
-
-    async fn send_message_with_retry(ctx: &Context, channel: ChannelId, content: &str) -> Result<(), serenity::Error> {
-        Self::retry_with_backoff(
-            || async {
-                channel.say(&ctx.http, content).await.map(|_| ())
-            }, 
-            3, 
-            2
-        ).await
-    }
-
     fn get_ids_from_messages(messages: &Vec<Message>) -> Vec<u64> {
         let mut result: Vec<u64> = vec![];
-        let re = Regex::new(r"\d+>\n*").unwrap();
-        let re2 = Regex::new(r"\d+").unwrap();
-        for m in messages{
-            if let Some(capture) = re.captures(m.content.as_str()) {
-                let new_capture = re2.captures(&capture[0]).unwrap();
-                result.push(new_capture[0].parse::<u64>().unwrap());
+        // Regex to find IDs in embed URLs like https://playstartrekonline.com/en/news/article/1234567
+        let re_embed_url = Regex::new(r"playstartrekonline\.com/en/news/article/(\d+)").unwrap();
+        // Original regex for message content (kept as fallback or for other potential ID formats)
+        let re_content = Regex::new(r"ID:(\d+)").unwrap(); // Adjusted to look for "ID:12345" pattern if needed, or keep original if that was intended. Let's assume URL is primary now.
+
+        for m in messages {
+            // Check embeds first
+            for embed in &m.embeds {
+                if let Some(url) = &embed.url {
+                    if let Some(capture) = re_embed_url.captures(url) {
+                        if let Ok(id) = capture[1].parse::<u64>() {
+                            result.push(id);
+                            // Assuming one news item per message, break after finding ID in embed
+                            break; 
+                        }
+                    }
+                }
+            }
+
+            // If not found in embed, check content (optional fallback)
+            if let Some(capture) = re_content.captures(m.content.as_str()) {
+                if let Ok(id) = capture[1].parse::<u64>() {
+                    result.push(id);
+                }
             }
         }
+        // Remove duplicates if necessary, although the logic should prevent adding the same ID twice per message
+        result.sort_unstable();
+        result.dedup();
         result
     }
 
@@ -386,23 +337,51 @@ impl Handler {
                 // Create embeds for items within the specified time period
                 for item in news.iter().filter(|item| item.is_within_weeks(weeks) && exclude_tags.as_ref().map_or(true, |tags| !tags.contains(&item.get_tag()))) {
                     found_items += 1;
-                    let embed = CreateEmbed::default()
+                    let (summary, icon_files) = item.format_with_platforms(&platforms);
+                    let mut embed = CreateEmbed::default()
                         .title(item.get_title())
-                        .description(item.get_summary())
+                        .description(summary)
                         .url(&format!("https://playstartrekonline.com/en/news/article/{}", item.get_id()));
-                    let embed = if let Some(img_url) = item.get_thumbnail_url() {
-                        embed.thumbnail(img_url)
-                    } else {
-                        embed
-                    };
+                    if let Some(img_url) = item.get_thumbnail_url() {
+                        embed = embed.thumbnail(img_url);
+                    }
+                    if let Some(icon_path) = icon_files.get(0) {
+                        embed = embed.image(format!("attachment://{}", icon_path.split('/').last().unwrap()));
+                    }
                     embeds.push(embed);
-                    
                     if found_items >= limit as usize {
                         break;
                     }
                 }
-                
-                if embeds.is_empty() {
+
+                // When sending the response, add the icon files as attachments
+                if !embeds.is_empty() {
+                    let mut msg = CreateInteractionResponseMessage::new()
+                        .content(format!("{} Found {} {} from the last {} {} (Platforms: {:?})", 
+                            title, 
+                            found_items,
+                            if found_items == 1 { "item" } else { "items" },
+                            weeks,
+                            if weeks == 1 { "week" } else { "weeks" },
+                            platforms))
+                        .embeds(embeds)
+                        .ephemeral(true);
+                    let mut all_icon_files = Vec::new();
+                    for item in news.iter() {
+                        let (_, icon_files) = item.format_with_platforms(&platforms);
+                        for icon in icon_files {
+                            if !all_icon_files.contains(&icon) {
+                                all_icon_files.push(icon);
+                            }
+                        }
+                    }
+                    for icon_path in all_icon_files {
+                        if let Ok(attachment) = CreateAttachment::path(icon_path.clone()).await {
+                            msg = msg.add_file(attachment);
+                        }
+                    }
+                    command.create_response(&ctx.http, CreateInteractionResponse::Message(msg)).await
+                } else {
                     command.create_response(&ctx.http, CreateInteractionResponse::Message(
                         CreateInteractionResponseMessage::new()
                             .content(format!("No {} found from the last {} {} for platforms: {:?}", 
@@ -414,19 +393,6 @@ impl Handler {
                                 weeks,
                                 if weeks == 1 { "week" } else { "weeks" },
                                 platforms))
-                            .ephemeral(true) // Makes this response only visible to the user who issued the command
-                    )).await
-                } else {
-                    command.create_response(&ctx.http, CreateInteractionResponse::Message(
-                        CreateInteractionResponseMessage::new()
-                            .content(format!("{} Found {} {} from the last {} {} (Platforms: {:?})", 
-                                title, 
-                                found_items,
-                                if found_items == 1 { "item" } else { "items" },
-                                weeks,
-                                if weeks == 1 { "week" } else { "weeks" },
-                                platforms))
-                            .embeds(embeds)
                             .ephemeral(true) // Makes this response only visible to the user who issued the command
                     )).await
                 }
@@ -757,19 +723,40 @@ impl EventHandler for Handler {
                     let builder = GetMessages::new().limit(self.msg_count);
                     if let Ok(existing_messages) = channel.messages(&ctx.http, builder).await {
                         let existing_ids = Self::get_ids_from_messages(&existing_messages);
+                        let mut embeds = Vec::new();
+                        let mut embed_icon_files = Vec::new();
                         for item in news.iter() {
                             if !existing_ids.contains(&item.get_id()) && item.is_fresh(self.fresh_seconds) {
                                 log_info("Sending news", Some(&format!("ID:{} Channel:{} Platforms:{:?}", item.get_id(), *channel_id, channel_platforms)));
-                                let embed = CreateEmbed::default()
+                                let (summary, icon_files) = item.format_with_platforms(&channel_platforms);
+                                let mut embed = CreateEmbed::default()
                                     .title(item.get_title())
-                                    .description(item.get_summary())
-                                    .url(&format!("https://playstartrekonline.com/en/news/article/{}", item.get_id()));
-                                let embed = if let Some(img_url) = item.get_thumbnail_url() {
-                                    embed.thumbnail(img_url)
+                                    .url(&format!("https://playstartrekonline.com/en/news/article/{}", item.get_id()))
+                                    .description(summary);
+                                if let Some(img_url) = item.get_thumbnail_url() {
+                                    embed = embed.thumbnail(img_url);
+                                }
+                                // Attach the first platform icon as the embed image (if any)
+                                if let Some(icon_path) = icon_files.get(0) {
+                                    let filename = icon_path.split('/').last().unwrap();
+                                    embed = embed.image(format!("attachment://{}", filename));
+                                    embed_icon_files.push(icon_path.clone());
                                 } else {
-                                    embed
-                                };
-                                let _ = channel.send_message(&ctx.http, serenity::builder::CreateMessage::default().embed(embed)).await;
+                                    embed_icon_files.push(String::new());
+                                }
+                                embeds.push(embed);
+                            }
+                        }
+                        if !embeds.is_empty() {
+                            let mut msg = serenity::builder::CreateMessage::default().embeds(embeds);
+                            for icon_path in embed_icon_files.iter().filter(|p| !p.is_empty()) {
+                                if let Ok(attachment) = CreateAttachment::path(icon_path.clone()).await {
+                                    msg = msg.add_file(attachment);
+                                }
+                            }
+                            match channel.send_message(&ctx.http, msg).await {
+                                Ok(_) => {},
+                                Err(e) => log_error("Failed to send scheduled news message", e),
                             }
                         }
                     }

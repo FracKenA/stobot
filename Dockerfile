@@ -1,4 +1,4 @@
-FROM docker.io/rust:bookworm AS builder
+FROM docker.io/rust:bookworm-slim AS builder
 ENV RUST_BACKTRACE=full
 WORKDIR /usr/src/stobot
 COPY . .

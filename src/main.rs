@@ -17,7 +17,7 @@ struct Args {
     channels_path: String,
 
     /// Time in seconds inbetween checking for news
-    #[clap(long, default_value_t = 10)]
+    #[clap(long, default_value_t = 600)]
     poll_period: u64,
 
     /// Number of news to poll in each period
@@ -25,11 +25,11 @@ struct Args {
     poll_count: u64,
 
     /// Maximum time difference in seconds between now and timestamp of news item to be even considered for posting
-    #[clap(short, long, default_value_t = 120)]
+    #[clap(short, long, default_value_t = 600)]
     fresh_seconds: u64,
 
     /// Amount of Discord messages to check for already posted news items during each poll. Discord has a limitation of 100.
-    #[clap(short, long, default_value_t = 50)]
+    #[clap(short, long, default_value_t = 10)]
     msg_count: u8,
 
     /// Space separated list of platforms to filter news from. E.g.: to have news from all 3: `pc ps xbox`
